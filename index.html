@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Test Ground-Truth Labeler & Evaluator — DSC 2026</title>
+<style>
+  :root {
+    --bg: #0f172a;
+    --panel: #1e293b;
+    --border: #334155;
+    --text: #f8fafc;
+    --muted: #94a3b8;
+    --accent: #3b82f6;
+    --green: #10b981;
+    --amber: #f59e0b;
+    --red: #ef4444;
+  }
+  * { box-sizing: border-box; font-family: 'Inter', system-ui, -apple-system, sans-serif; }
+  body { margin: 0; padding: 16px 20px; background: var(--bg); color: var(--text); display: flex; flex-direction: column; align-items: center; min-height: 100vh; }
+  header { width: 100%; max-width: 1240px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 10px; }
+  h1 { margin: 0; font-size: 19px; font-weight: 700; }
+  .progress-wrap { flex: 1; min-width: 260px; max-width: 460px; background: var(--panel); padding: 8px 14px; border-radius: 8px; border: 1px solid var(--border); }
+  .progress-top { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 5px; color: var(--muted); font-weight: 600; }
+  .progress-bar-bg { width: 100%; height: 8px; background: #0f172a; border-radius: 99px; overflow: hidden; }
+  .progress-bar-fill { height: 100%; background: var(--green); width: 0%; transition: width 0.2s; }
+
+  .main-grid { display: grid; grid-template-columns: 1fr 440px; gap: 18px; width: 100%; max-width: 1240px; align-items: start; }
+  @media (max-width: 960px) { .main-grid { grid-template-columns: 1fr; } }
+
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+  .viewer-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; gap: 8px; flex-wrap: wrap; }
+  .img-title { font-size: 17px; font-weight: 700; }
+  .badges { display: flex; gap: 8px; align-items: center; }
+  .badge { padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: 700; background: #334155; color: #cbd5e1; }
+  .badge.labeled { background: #065f46; color: #6ee7b7; border: 1px solid #10b981; }
+  .badge.uncertain { background: #78350f; color: #fde68a; border: 1px solid #f59e0b; }
+  .badge.mismatch { background: #7f1d1d; color: #fca5a5; border: 1px solid #ef4444; }
+  .badge.match { background: #1e3a8a; color: #93c5fd; border: 1px solid #3b82f6; }
+
+  .img-stage { width: 100%; height: 470px; background: #020617; border-radius: 10px; border: 2px solid var(--border); display: flex; align-items: center; justify-content: center; overflow: hidden; position: relative; }
+  .img-stage img { max-width: 100%; max-height: 100%; object-fit: contain; }
+
+  .filter-bar { display: flex; gap: 6px; margin-top: 12px; flex-wrap: wrap; align-items: center; justify-content: space-between; }
+  .filter-group { display: flex; gap: 6px; flex-wrap: wrap; }
+  .chip { padding: 6px 10px; border-radius: 6px; font-size: 12px; font-weight: 600; background: #0f172a; color: var(--muted); border: 1px solid var(--border); cursor: pointer; }
+  .chip.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+  .jump-box { display: flex; gap: 6px; }
+  .jump-box input { width: 110px; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--border); background: #0f172a; color: #fff; font-size: 12px; }
+  .jump-box button { padding: 6px 10px; border-radius: 6px; border: none; background: #334155; color: #fff; font-weight: 600; cursor: pointer; font-size: 12px; }
+
+  /* Ergonomic 2x4 QWER / ASDF Keyboard Layout */
+  .section-label { font-size: 12px; color: var(--muted); font-weight: 600; margin-bottom: 8px; display: flex; justify-content: space-between; }
+  .kbd-row-label { font-size: 11px; color: #64748b; margin: 6px 0 4px 0; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+  .kbd-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 10px; }
+  .key-btn { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 10px 6px; background: #0f172a; border: 2px solid var(--border); border-radius: 10px; color: var(--text); cursor: pointer; transition: 0.1s; position: relative; }
+  .key-btn:hover { border-color: #60a5fa; transform: translateY(-1px); }
+  .key-btn.active { background: #064e3b; border-color: var(--green); box-shadow: 0 0 0 2px rgba(16,185,129,0.25); }
+  .key-cap { font-size: 16px; font-weight: 800; color: #38bdf8; background: #1e293b; border: 1px solid #475569; border-bottom-width: 3px; padding: 2px 10px; border-radius: 6px; margin-bottom: 5px; }
+  .key-btn.active .key-cap { color: #fff; background: #059669; border-color: #34d399; }
+  .key-cat { font-size: 12px; font-weight: 700; text-transform: capitalize; }
+  .key-cnt { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+  .action-row { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 8px; margin-bottom: 14px; }
+  .act-btn { padding: 9px 6px; border-radius: 8px; border: 1px solid var(--border); background: #0f172a; color: var(--text); font-size: 12px; font-weight: 600; cursor: pointer; text-align: center; }
+  .act-btn:hover { background: #334155; }
+  .act-btn.warn { border-color: #78350f; color: #fcd34d; }
+  .act-btn.warn.active { background: #78350f; color: #fff; }
+  .act-btn.danger { border-color: #7f1d1d; color: #fca5a5; }
+
+  .io-box { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 14px; }
+  .btn-primary { padding: 10px; border-radius: 8px; border: none; background: var(--accent); color: #fff; font-weight: 700; font-size: 13px; cursor: pointer; }
+  .btn-primary:hover { background: #2563eb; }
+  .btn-secondary { padding: 10px; border-radius: 8px; border: 1px solid var(--border); background: #0f172a; color: #e2e8f0; font-weight: 600; font-size: 12px; cursor: pointer; text-align: center; display: inline-block; }
+  .btn-secondary:hover { background: #334155; }
+
+  /* Evaluator Panel */
+  .eval-box { border-top: 1px solid var(--border); padding-top: 14px; margin-top: 6px; }
+  .score-card { background: #0f172a; border: 1px solid var(--border); border-radius: 10px; padding: 12px; margin-top: 10px; }
+  .score-big { font-size: 26px; font-weight: 800; color: var(--green); }
+  .score-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .per-class-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 12px; }
+  .per-class-table th, .per-class-table td { padding: 5px 6px; border-bottom: 1px solid #1e293b; text-align: left; }
+  .per-class-table th { color: var(--muted); font-weight: 600; }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>Test Set Ground-Truth & Submission Evaluator (480 Images)</h1>
+    <div style="font-size:12px; color:var(--muted);">Keyboard Non-Numpad Mode: Gunakan tangan kiri di <b>Q W E R</b> & <b>A S D F</b> | Navigasi: <b>Space / &larr; / &rarr;</b></div>
+  </div>
+  <div class="progress-wrap">
+    <div class="progress-top">
+      <span id="prog-text">Terlabeli: 0 / 480 (0.0%)</span>
+      <span id="uncertain-text">Ragu: 0</span>
+    </div>
+    <div class="progress-bar-bg">
+      <div class="progress-bar-fill" id="prog-fill"></div>
+    </div>
+  </div>
+</header>
+
+<div class="main-grid">
+  <!-- LEFT: IMAGE VIEWER -->
+  <div class="card">
+    <div class="viewer-top">
+      <div class="img-title" id="img-title">001.jpg (1 / 480)</div>
+      <div class="badges">
+        <span class="badge" id="gt-badge">Belum Dilabeli</span>
+        <span class="badge" id="unc-badge" style="display:none;">RAGU-RAGU (X)</span>
+        <span class="badge" id="sub-badge" style="display:none;"></span>
+      </div>
+    </div>
+
+    <div class="img-stage">
+      <img id="main-img" src="" alt="Test Image">
+    </div>
+
+    <div class="filter-bar">
+      <div class="filter-group">
+        <button class="chip active" id="flt-all" onclick="setFilter('all')">Semua (480)</button>
+        <button class="chip" id="flt-unlabeled" onclick="setFilter('unlabeled')">Belum Dilabeli</button>
+        <button class="chip" id="flt-uncertain" onclick="setFilter('uncertain')">Ragu-ragu (X)</button>
+        <button class="chip" id="flt-mismatch" onclick="setFilter('mismatch')" style="display:none;">Beda dgn Submission</button>
+      </div>
+      <div class="jump-box">
+        <input type="number" id="jump-input" min="1" max="480" placeholder="No (1-480)">
+        <button onclick="jumpToId()">Loncat</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- RIGHT: ERGONOMIC KEYBOARD CONTROLS & SUBMISSION CHECKER -->
+  <div class="card">
+    <div class="section-label">
+      <span>TOMBOL KATEGORI (TANGAN KIRI: QWER + ASDF)</span>
+      <span>Auto-Next: <input type="checkbox" id="auto-next" checked></span>
+    </div>
+
+    <div class="kbd-row-label">Baris Atas (Q W E R / 1 2 3 4)</div>
+    <div class="kbd-grid" id="row-top"></div>
+
+    <div class="kbd-row-label">Baris Tengah / Home Row (A S D F / 5 6 7 8)</div>
+    <div class="kbd-grid" id="row-home"></div>
+
+    <div class="action-row">
+      <button class="act-btn" onclick="prevImg()" title="Shortcut: Panah Kiri / Z / Backspace">&larr; Prev (Z)</button>
+      <button class="act-btn warn" id="btn-uncertain" onclick="toggleUncertain()" title="Shortcut: X">Ragu (X)</button>
+      <button class="act-btn danger" onclick="clearLabel()" title="Shortcut: Delete">Hapus (Del)</button>
+      <button class="act-btn" onclick="nextImg()" title="Shortcut: Space / Panah Kanan">Next (Space) &rarr;</button>
+    </div>
+
+    <div class="io-box">
+      <button class="btn-primary" onclick="exportGroundTruthCSV()">Download test_ground_truth.csv</button>
+      <label class="btn-secondary">
+        Import Ground Truth CSV
+        <input type="file" accept=".csv" style="display:none" onchange="importGroundTruthCSV(event)">
+      </label>
+    </div>
+
+    <!-- SUBMISSION ACCURACY CHECKER -->
+    <div class="eval-box">
+      <div class="section-label">
+        <span>CEK PERFORMA SUBMISSION.CSV SEBELUM SUBMIT KE KAGGLE</span>
+      </div>
+      <label class="btn-secondary" style="width:100%; border-color:#3b82f6; color:#93c5fd; padding:11px;">
+        Upload / Pilih File submission.csv untuk Cek Akurasi
+        <input type="file" accept=".csv" style="display:none" onchange="loadSubmissionCSV(event)">
+      </label>
+
+      <div id="eval-result" class="score-card" style="display:none;">
+        <div style="display:flex; justify-content:space-between; align-items:baseline;">
+          <div>
+            <div class="score-big" id="acc-overall">0.00%</div>
+            <div class="score-sub" id="acc-detail">0 / 0 cocok dengan Ground Truth</div>
+          </div>
+          <div style="text-align:right;">
+            <div style="font-size:15px; font-weight:700; color:#38bdf8;" id="acc-confident">0.00%</div>
+            <div class="score-sub">Akurasi (Tanpa Ragu)</div>
+          </div>
+        </div>
+        <table class="per-class-table">
+          <thead>
+            <tr><th>Kelas</th><th>GT</th><th>Pred</th><th>Cocok</th><th>Akurasi Kelas</th></tr>
+          </thead>
+          <tbody id="eval-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const TEST_FILES = ["001.jpg", "002.jpg", "003.jpg", "004.jpg", "005.jpg", "006.jpg", "007.jpg", "008.jpg", "009.jpg", "010.jpg", "011.jpg", "012.jpg", "013.jpg", "014.jpg", "015.jpg", "016.jpg", "017.jpg", "018.jpg", "019.jpg", "020.jpg", "021.jpg", "022.jpg", "023.jpg", "024.jpg", "025.jpg", "026.jpg", "027.jpg", "028.jpg", "029.jpg", "030.jpg", "031.jpg", "032.jpg", "033.jpg", "034.jpg", "035.jpg", "036.jpg", "037.jpg", "038.jpg", "039.png", "040.jpg", "041.jpg", "042.jpg", "043.jpg", "044.jpg", "045.jpg", "046.jpg", "047.jpg", "048.jpg", "049.jpg", "050.jpg", "051.jpg", "052.jpg", "053.jpg", "054.jpg", "055.jpg", "056.jpg", "057.jpg", "058.jpg", "059.jpg", "060.jpg", "061.jpg", "062.jpg", "063.jpg", "064.jpg", "065.jpg", "066.jpg", "067.jpg", "068.jpg", "069.jpg", "070.jpg", "071.jpg", "072.jpg", "073.jpg", "074.jpg", "075.jpg", "076.jpg", "077.jpg", "078.jpg", "079.jpg", "080.jpg", "081.jpg", "082.jpg", "083.jpg", "084.jpg", "085.jpg", "086.jpg", "087.jpg", "088.jpg", "089.jpg", "090.jpg", "091.jpg", "092.jpg", "093.jpg", "094.jpg", "095.jpg", "096.jpg", "097.jpg", "098.jpg", "099.jpg", "100.jpg", "101.jpg", "102.jpg", "103.jpg", "104.jpg", "105.jpg", "106.jpg", "107.jpg", "108.jpg", "109.jpg", "110.jpg", "111.jpg", "112.jpg", "113.jpg", "114.jpg", "115.jpg", "116.jpg", "117.jpg", "118.jpg", "119.jpg", "120.jpg", "121.jpg", "122.jpg", "123.jpg", "124.jpg", "125.jpg", "126.jpg", "127.jpg", "128.jpg", "129.jpg", "130.jpg", "131.jpg", "132.jpg", "133.jpg", "134.jpg", "135.jpg", "136.jpg", "137.jpg", "138.jpg", "139.jpg", "140.jpg", "141.jpg", "142.jpeg", "143.jpg", "144.jpg", "145.jpg", "146.jpg", "147.jpg", "148.jpg", "149.jpg", "150.jpg", "151.jpg", "152.jpg", "153.jpg", "154.jpg", "155.jpg", "156.jpg", "157.jpg", "158.jpg", "159.jpg", "160.jpg", "161.jpg", "162.jpg", "163.jpg", "164.jpg", "165.jpg", "166.jpeg", "167.jpg", "168.jpg", "169.jpg", "170.jpg", "171.jpg", "172.jpg", "173.jpg", "174.jpg", "175.jpg", "176.jpg", "177.jpg", "178.jpg", "179.jpg", "180.jpg", "181.jpg", "182.jpg", "183.jpg", "184.jpg", "185.jpg", "186.jpg", "187.jpg", "188.jpg", "189.jpg", "190.jpg", "191.jpg", "192.jpg", "193.jpg", "194.jpg", "195.jpg", "196.jpg", "197.jpg", "198.jpg", "199.jpg", "200.jpg", "201.jpg", "202.jpg", "203.jpg", "204.jpg", "205.jpg", "206.jpg", "207.jpg", "208.jpg", "209.jpg", "210.jpg", "211.jpg", "212.jpg", "213.jpg", "214.jpg", "215.jpg", "216.jpg", "217.jpg", "218.jpg", "219.jpg", "220.jpg", "221.jpg", "222.jpg", "223.jpg", "224.jpg", "225.jpg", "226.jpg", "227.jpg", "228.jpg", "229.jpg", "230.jpg", "231.jpg", "232.jpg", "233.jpg", "234.jpg", "235.jpg", "236.jpg", "237.jpg", "238.jpg", "239.jpg", "240.jpg", "241.jpg", "242.jpg", "243.jpg", "244.jpg", "245.jpg", "246.jpg", "247.jpg", "248.jpg", "249.jpg", "250.jpg", "251.jpg", "252.jpg", "253.jpg", "254.jpg", "255.jpg", "256.jpg", "257.jpg", "258.jpg", "259.jpg", "260.jpg", "261.jpg", "262.jpg", "263.jpg", "264.jpg", "265.jpg", "266.jpg", "267.jpg", "268.jpg", "269.jpg", "270.jpg", "271.jpg", "272.jpg", "273.jpg", "274.jpg", "275.jpg", "276.jpg", "277.jpg", "278.jpg", "279.jpg", "280.jpg", "281.jpg", "282.jpg", "283.jpg", "284.jpg", "285.jpg", "286.jpg", "287.jpg", "288.jpg", "289.jpg", "290.jpg", "291.jpg", "292.jpg", "293.jpg", "294.jpg", "295.jpg", "296.jpg", "297.jpg", "298.jpg", "299.jpg", "300.jpg", "301.jpg", "302.jpg", "303.jpg", "304.jpg", "305.jpg", "306.jpg", "307.jpg", "308.jpg", "309.jpg", "310.jpg", "311.jpg", "312.jpg", "313.jpg", "314.jpg", "315.jpg", "316.jpg", "317.jpg", "318.jpg", "319.jpg", "320.jpg", "321.jpg", "322.jpg", "323.jpg", "324.jpg", "325.jpg", "326.jpg", "327.jpg", "328.jpg", "329.jpg", "330.jpg", "331.jpg", "332.jpg", "333.jpg", "334.jpg", "335.jpg", "336.jpg", "337.jpg", "338.jpg", "339.jpg", "340.jpg", "341.jpg", "342.jpg", "343.jpg", "344.jpg", "345.jpg", "346.jpg", "347.jpg", "348.jpg", "349.jpg", "350.jpg", "351.jpg", "352.jpg", "353.jpg", "354.jpg", "355.jpg", "356.jpg", "357.jpg", "358.jpg", "359.jpg", "360.jpg", "361.jpg", "362.jpg", "363.jpg", "364.jpg", "365.jpg", "366.jpg", "367.jpg", "368.jpg", "369.jpg", "370.jpg", "371.jpg", "372.jpg", "373.jpg", "374.jpg", "375.jpg", "376.jpg", "377.jpg", "378.jpg", "379.jpg", "380.jpg", "381.jpg", "382.jpg", "383.jpg", "384.jpg", "385.jpg", "386.jpg", "387.jpg", "388.jpg", "389.jpg", "390.jpg", "391.jpg", "392.jpg", "393.jpg", "394.jpg", "395.jpg", "396.jpg", "397.jpg", "398.jpg", "399.jpg", "400.jpg", "401.jpg", "402.jpg", "403.jpg", "404.jpg", "405.jpg", "406.jpg", "407.jpg", "408.jpg", "409.jpg", "410.jpg", "411.jpg", "412.jpg", "413.jpg", "414.jpg", "415.jpg", "416.jpg", "417.jpg", "418.jpg", "419.jpg", "420.jpg", "421.jpg", "422.jpg", "423.jpg", "424.jpg", "425.jpg", "426.jpg", "427.jpg", "428.jpg", "429.jpg", "430.jpg", "431.jpg", "432.jpg", "433.jpg", "434.jpg", "435.jpg", "436.jpg", "437.jpg", "438.jpg", "439.jpg", "440.jpg", "441.jpg", "442.jpg", "443.jpg", "444.jpg", "445.jpg", "446.jpg", "447.jpg", "448.jpg", "449.jpg", "450.jpg", "451.jpg", "452.jpg", "453.jpg", "454.jpg", "455.jpg", "456.jpg", "457.jpg", "458.jpg", "459.jpg", "460.jpg", "461.jpg", "462.jpg", "463.jpg", "464.jpg", "465.jpg", "466.jpg", "467.jpg", "468.jpg", "469.jpg", "470.jpg", "471.jpg", "472.jpg", "473.jpg", "474.jpg", "475.jpg", "476.jpg", "477.jpg", "478.jpg", "479.jpg", "480.jpg"];
+
+// Ergonomic Left-Hand 2x4 Key Mapping (No Numpad Needed!)
+const KEY_CONFIG = [
+  // Top Row: Q W E R
+  { cat: 'cardboard',  key: 'Q', altKey: '1', row: 'top' },
+  { cat: 'electronic', key: 'W', altKey: '2', row: 'top' },
+  { cat: 'foodwaste',  key: 'E', altKey: '3', row: 'top' },
+  { cat: 'glass',      key: 'R', altKey: '4', row: 'top' },
+  // Home Row: A S D F
+  { cat: 'metal',      key: 'A', altKey: '5', row: 'home' },
+  { cat: 'paper',      key: 'S', altKey: '6', row: 'home' },
+  { cat: 'plastic',    key: 'D', altKey: '7', row: 'home' },
+  { cat: 'textile',    key: 'F', altKey: '8', row: 'home' }
+];
+
+const KEY_TO_CAT = {};
+KEY_CONFIG.forEach(item => {
+  KEY_TO_CAT[item.key.toLowerCase()] = item.cat;
+  KEY_TO_CAT[item.altKey] = item.cat;
+});
+
+let gtLabels = JSON.parse(localStorage.getItem('dsc_test_gt_labels') || '{}');
+let gtUncertain = JSON.parse(localStorage.getItem('dsc_test_gt_uncertain') || '{}');
+let subPredictions = {}; // img_id (e.g. "001") -> waste_category
+let hasSubmissionLoaded = false;
+
+let filterMode = 'all'; // 'all' | 'unlabeled' | 'uncertain' | 'mismatch'
+let filteredIndices = TEST_FILES.map((_, i) => i);
+let posInFiltered = 0;
+
+function getImgId(fname) {
+  return fname.split('.')[0];
+}
+
+function saveState() {
+  localStorage.setItem('dsc_test_gt_labels', JSON.stringify(gtLabels));
+  localStorage.setItem('dsc_test_gt_uncertain', JSON.stringify(gtUncertain));
+}
+
+function rebuildFilter(preserveCurrentFile = true) {
+  const curFile = filteredIndices.length > 0 ? TEST_FILES[filteredIndices[posInFiltered]] : TEST_FILES[0];
+  filteredIndices = [];
+  TEST_FILES.forEach((fname, idx) => {
+    const id = getImgId(fname);
+    const lab = gtLabels[id];
+    const unc = !!gtUncertain[id];
+    const sub = subPredictions[id];
+    if (filterMode === 'all') filteredIndices.push(idx);
+    else if (filterMode === 'unlabeled' && !lab) filteredIndices.push(idx);
+    else if (filterMode === 'uncertain' && unc) filteredIndices.push(idx);
+    else if (filterMode === 'mismatch' && lab && sub && lab !== sub) filteredIndices.push(idx);
+  });
+
+  if (filteredIndices.length === 0) {
+    posInFiltered = 0;
+  } else if (preserveCurrentFile) {
+    const newPos = filteredIndices.indexOf(TEST_FILES.indexOf(curFile));
+    posInFiltered = newPos >= 0 ? newPos : Math.min(posInFiltered, filteredIndices.length - 1);
+  } else {
+    posInFiltered = 0;
+  }
+}
+
+function setFilter(mode) {
+  filterMode = mode;
+  ['all', 'unlabeled', 'uncertain', 'mismatch'].forEach(m => {
+    const el = document.getElementById('flt-' + m);
+    if (el) el.className = 'chip' + (m === mode ? ' active' : '');
+  });
+  rebuildFilter(false);
+  renderAll();
+}
+
+function renderKeyGrid() {
+  const topEl = document.getElementById('row-top');
+  const homeEl = document.getElementById('row-home');
+  topEl.innerHTML = '';
+  homeEl.innerHTML = '';
+
+  const counts = {};
+  KEY_CONFIG.forEach(k => counts[k.cat] = 0);
+  Object.values(gtLabels).forEach(c => { if (counts[c] !== undefined) counts[c]++; });
+
+  const curIdx = filteredIndices[posInFiltered];
+  const curId = curIdx !== undefined ? getImgId(TEST_FILES[curIdx]) : null;
+  const curLabel = curId ? gtLabels[curId] : null;
+
+  KEY_CONFIG.forEach(item => {
+    const btn = document.createElement('button');
+    btn.className = 'key-btn' + (curLabel === item.cat ? ' active' : '');
+    btn.innerHTML = `
+      <span class="key-cap">${item.key}</span>
+      <span class="key-cat">${item.cat}</span>
+      <span class="key-cnt">${counts[item.cat]} img</span>
+    `;
+    btn.onclick = () => assignLabel(item.cat);
+    if (item.row === 'top') topEl.appendChild(btn);
+    else homeEl.appendChild(btn);
+  });
+}
+
+function renderProgress() {
+  const totalLabeled = Object.keys(gtLabels).filter(k => !!gtLabels[k]).length;
+  const totalUnc = Object.keys(gtUncertain).filter(k => !!gtUncertain[k]).length;
+  const pct = ((totalLabeled / TEST_FILES.length) * 100).toFixed(1);
+  document.getElementById('prog-text').textContent = `Terlabeli: ${totalLabeled} / ${TEST_FILES.length} (${pct}%)`;
+  document.getElementById('uncertain-text').textContent = `Ragu: ${totalUnc}`;
+  document.getElementById('prog-fill').style.width = `${pct}%`;
+
+  // Update filter button counts
+  const unlabCount = TEST_FILES.length - totalLabeled;
+  document.getElementById('flt-unlabeled').textContent = `Belum Dilabeli (${unlabCount})`;
+  document.getElementById('flt-uncertain').textContent = `Ragu-ragu (${totalUnc})`;
+}
+
+function renderViewer() {
+  const imgEl = document.getElementById('main-img');
+  const titleEl = document.getElementById('img-title');
+  const gtBadge = document.getElementById('gt-badge');
+  const uncBadge = document.getElementById('unc-badge');
+  const subBadge = document.getElementById('sub-badge');
+  const btnUnc = document.getElementById('btn-uncertain');
+
+  if (filteredIndices.length === 0) {
+    titleEl.textContent = 'Tidak ada gambar pada filter ini';
+    imgEl.src = '';
+    gtBadge.textContent = '-';
+    uncBadge.style.display = 'none';
+    subBadge.style.display = 'none';
+    return;
+  }
+
+  const realIdx = filteredIndices[posInFiltered];
+  const fname = TEST_FILES[realIdx];
+  const id = getImgId(fname);
+  const lab = gtLabels[id];
+  const isUnc = !!gtUncertain[id];
+
+  titleEl.textContent = `${fname} (${posInFiltered + 1} / ${filteredIndices.length})`;
+  imgEl.src = `test/${fname}`;
+
+  if (lab) {
+    gtBadge.textContent = `GT: ${lab.toUpperCase()}`;
+    gtBadge.className = 'badge labeled';
+  } else {
+    gtBadge.textContent = 'Belum Dilabeli';
+    gtBadge.className = 'badge';
+  }
+
+  uncBadge.style.display = isUnc ? 'inline-block' : 'none';
+  btnUnc.className = 'act-btn warn' + (isUnc ? ' active' : '');
+
+  if (hasSubmissionLoaded && subPredictions[id]) {
+    const pred = subPredictions[id];
+    subBadge.style.display = 'inline-block';
+    if (!lab) {
+      subBadge.textContent = `Sub: ${pred.toUpperCase()}`;
+      subBadge.className = 'badge';
+    } else if (lab === pred) {
+      subBadge.textContent = `Sub COCOK: ${pred.toUpperCase()}`;
+      subBadge.className = 'badge match';
+    } else {
+      subBadge.textContent = `Sub BEDA: ${pred.toUpperCase()}`;
+      subBadge.className = 'badge mismatch';
+    }
+  } else {
+    subBadge.style.display = 'none';
+  }
+}
+
+function renderEvaluation() {
+  if (!hasSubmissionLoaded) return;
+  const evalCard = document.getElementById('eval-result');
+  evalCard.style.display = 'block';
+
+  let compared = 0, correct = 0;
+  let confCompared = 0, confCorrect = 0;
+  let mismatchCount = 0;
+
+  const stats = {};
+  KEY_CONFIG.forEach(k => {
+    stats[k.cat] = { gt: 0, pred: 0, hit: 0 };
+  });
+
+  TEST_FILES.forEach(fname => {
+    const id = getImgId(fname);
+    const gt = gtLabels[id];
+    const pred = subPredictions[id];
+    const unc = !!gtUncertain[id];
+
+    if (pred && stats[pred]) stats[pred].pred++;
+    if (gt && stats[gt]) {
+      stats[gt].gt++;
+      if (pred) {
+        compared++;
+        if (!unc) confCompared++;
+        if (gt === pred) {
+          correct++;
+          stats[gt].hit++;
+          if (!unc) confCorrect++;
+        } else {
+          mismatchCount++;
+        }
+      }
+    }
+  });
+
+  const acc = compared > 0 ? ((correct / compared) * 100).toFixed(2) : '0.00';
+  const confAcc = confCompared > 0 ? ((confCorrect / confCompared) * 100).toFixed(2) : '0.00';
+
+  document.getElementById('acc-overall').textContent = `${acc}%`;
+  document.getElementById('acc-detail').textContent = `${correct} / ${compared} cocok (${mismatchCount} berbeda)`;
+  document.getElementById('acc-confident').textContent = `${confAcc}% (${confCorrect}/${confCompared})`;
+
+  const fltMismatch = document.getElementById('flt-mismatch');
+  fltMismatch.style.display = 'inline-block';
+  fltMismatch.textContent = `Beda dgn Submission (${mismatchCount})`;
+
+  const tbody = document.getElementById('eval-tbody');
+  tbody.innerHTML = KEY_CONFIG.map(k => {
+    const s = stats[k.cat];
+    const cAcc = s.gt > 0 ? ((s.hit / s.gt) * 100).toFixed(1) + '%' : '-';
+    return `<tr>
+      <td><b>${k.cat}</b></td>
+      <td>${s.gt}</td>
+      <td>${s.pred}</td>
+      <td>${s.hit}</td>
+      <td><b>${cAcc}</b></td>
+    </tr>`;
+  }).join('');
+}
+
+function renderAll() {
+  renderProgress();
+  renderKeyGrid();
+  renderViewer();
+  renderEvaluation();
+}
+
+function assignLabel(cat) {
+  if (filteredIndices.length === 0) return;
+  const realIdx = filteredIndices[posInFiltered];
+  const id = getImgId(TEST_FILES[realIdx]);
+  gtLabels[id] = cat;
+  saveState();
+
+  const autoNext = document.getElementById('auto-next').checked;
+  if (filterMode === 'unlabeled') {
+    rebuildFilter(false);
+    renderAll();
+  } else {
+    renderAll();
+    if (autoNext && posInFiltered < filteredIndices.length - 1) {
+      setTimeout(() => {
+        posInFiltered++;
+        renderAll();
+      }, 60);
+    }
+  }
+}
+
+function toggleUncertain() {
+  if (filteredIndices.length === 0) return;
+  const realIdx = filteredIndices[posInFiltered];
+  const id = getImgId(TEST_FILES[realIdx]);
+  if (gtUncertain[id]) delete gtUncertain[id];
+  else gtUncertain[id] = true;
+  saveState();
+  rebuildFilter(true);
+  renderAll();
+}
+
+function clearLabel() {
+  if (filteredIndices.length === 0) return;
+  const realIdx = filteredIndices[posInFiltered];
+  const id = getImgId(TEST_FILES[realIdx]);
+  delete gtLabels[id];
+  delete gtUncertain[id];
+  saveState();
+  rebuildFilter(true);
+  renderAll();
+}
+
+function nextImg() {
+  if (posInFiltered < filteredIndices.length - 1) {
+    posInFiltered++;
+    renderAll();
+  }
+}
+
+function prevImg() {
+  if (posInFiltered > 0) {
+    posInFiltered--;
+    renderAll();
+  }
+}
+
+function jumpToId() {
+  const v = parseInt(document.getElementById('jump-input').value, 10);
+  if (v >= 1 && v <= TEST_FILES.length) {
+    setFilter('all');
+    posInFiltered = v - 1;
+    renderAll();
+  }
+}
+
+function exportGroundTruthCSV() {
+  const rows = ['image_id,waste_category,uncertain'];
+  TEST_FILES.forEach(fname => {
+    const id = getImgId(fname);
+    const lab = gtLabels[id] || '';
+    const unc = gtUncertain[id] ? '1' : '0';
+    rows.push(`${id},${lab},${unc}`);
+  });
+  const blob = new Blob([rows.join('\n')], { type: 'text/csv' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'test_ground_truth.csv';
+  a.click();
+}
+
+function parseCSVText(text) {
+  const lines = text.trim().split(/\r?\n/);
+  const result = [];
+  for (let i = 1; i < lines.length; i++) {
+    const cols = lines[i].split(',').map(s => s.trim());
+    if (cols.length >= 2) result.push(cols);
+  }
+  return result;
+}
+
+function importGroundTruthCSV(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    const rows = parseCSVText(e.target.result);
+    rows.forEach(cols => {
+      const id = cols[0].split('.')[0].padStart(3, '0');
+      const cat = (cols[1] || '').toLowerCase();
+      const unc = cols[2] === '1' || cols[2] === 'true';
+      if (cat) gtLabels[id] = cat;
+      if (unc) gtUncertain[id] = true;
+    });
+    saveState();
+    rebuildFilter(true);
+    renderAll();
+  };
+  reader.readAsText(file);
+}
+
+function loadSubmissionCSV(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    subPredictions = {};
+    const rows = parseCSVText(e.target.result);
+    rows.forEach(cols => {
+      const id = cols[0].split('.')[0].padStart(3, '0');
+      const cat = (cols[1] || '').toLowerCase();
+      if (cat) subPredictions[id] = cat;
+    });
+    hasSubmissionLoaded = true;
+    rebuildFilter(true);
+    renderAll();
+  };
+  reader.readAsText(file);
+}
+
+document.addEventListener('keydown', e => {
+  if (document.activeElement.tagName === 'INPUT') return;
+  const k = e.key.toLowerCase();
+  if (KEY_TO_CAT[k]) {
+    e.preventDefault();
+    assignLabel(KEY_TO_CAT[k]);
+  } else if (e.key === ' ' || e.key === 'ArrowRight' || k === 'l') {
+    e.preventDefault();
+    nextImg();
+  } else if (e.key === 'ArrowLeft' || e.key === 'Backspace' || k === 'z' || k === 'j') {
+    e.preventDefault();
+    prevImg();
+  } else if (k === 'x') {
+    e.preventDefault();
+    toggleUncertain();
+  } else if (e.key === 'Delete') {
+    e.preventDefault();
+    clearLabel();
+  }
+});
+
+renderAll();
+</script>
+</body>
+</html>
